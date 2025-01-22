@@ -2,7 +2,13 @@ name: hello-world
 on: push
 jobs:
   my-job:
-    runs-on: ubuntu-latest
+    runs-on: windows-2019
+    defaults:
+      run:
+        shell: powershell
     steps:
       - name: my-step
-        run: echo "Hello World!"
+        run: |
+          $env:cache_dir = "${{ env.CACHE_DIR }}"
+          $env:cache_dir
+          echo "Hello World!"
