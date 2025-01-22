@@ -1,14 +1,107 @@
-name: hello-world
-on: push
+name: CI Windows
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      force_debug_with_tmate:
+        type: boolean
+        description: 'Run the build with tmate session'
+        required: false
+        default: false
+      debug_with_tmate:
+        type: boolean
+        description: 'Run the build with a tmate session ONLY in case of failure'
+        required: false
+        default: false
+      force_ccache:
+        type: boolean
+        description: 'Force save ccache'
+        required: false
+        default: false
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-build-test-cpp-windows-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
-  my-job:
+  build_and_ctest:
+    name: Build and Test (windows, ASSERTIONS)
     runs-on: windows-2019
+    strategy:
+      fail-fast: true
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CACHE_KEY: windows-build-test-cpp-asserts-v1-${{ format('{0}-{1}', github.ref_name, github.run_number) }}
     defaults:
       run:
         shell: powershell
     steps:
-      - name: my-step
+      - name: Set unified TZ
+        uses: szenius/set-timezone@1f9716b0f7120e344f0c62bb7b1ee98819aefd42 # v2.0
+        with:
+          # this is an arbitrary choice
+          timezoneLinux: "Asia/Singapore"
+          timezoneMacos: "Asia/Singapore"
+          timezoneWindows: "Singapore Standard Time"
+
+      - name: "Checking out repository"
+        env:
+          BRANCH_NAME: main
+          REPO_ADDRESS: https://github.com/nod-ai/iree-amd-aie
+        shell: bash
+        run: |
+          git init
+          git remote add origin $REPO_ADDRESS
+          git -c protocol.version=2 fetch --depth 1 origin $BRANCH_NAME
+          git reset --hard FETCH_HEAD
+          git -c submodule."third_party/torch-mlir".update=none \
+              -c submodule."third_party/stablehlo".update=none \
+              -c submodule."src/runtime_src/core/common/aiebu".update=none \
+              submodule update --init --recursive --depth 1 --single-branch -j 10
+
+      - name: Setup Cpp
+        uses: aminya/setup-cpp@1fd813945e55021261b381c59275db442da4082f # v0.45.0
+        with:
+          compiler: llvm
+          vcvarsall: true
+          cmake: true
+          ninja: true
+          ccache: true
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Python deps
+        run: |
+          pip install -r third_party\iree\runtime\bindings\python\iree\runtime\build_requirements.txt
+          pip install pyyaml pybind11==2.13.6 nanobind==2.4.0
+
+      - name: Enable cache
+        uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ${{ env.CACHE_DIR }}
+          key: ${{ env.CACHE_KEY }}
+          restore-keys: windows-build-test-cpp-
+
+      - name: Peano dep
+        run: |
+          .\build_tools\download_peano.ps1
+          Add-Content -Path $env:GITHUB_ENV -Value "PEANO_INSTALL_DIR=$PWD\llvm-aie"
+
+      - name: Build packages
         run: |
           $env:cache_dir = "${{ env.CACHE_DIR }}"
           $env:cache_dir
-          echo "Hello World!"
+          $env:CCACHE_COMPILERCHECK = "string:$(clang-cl.exe --version)"
+          $env:CCACHE_COMPILERCHECK
+          .\build_tools\build_llvm.ps1
+          # Remove-Item -Path "$pwd\llvm-build" -Force
+          $env:llvm_install_dir = "$pwd\llvm-install"
+          .\build_tools.\build_test_cpp.ps1
