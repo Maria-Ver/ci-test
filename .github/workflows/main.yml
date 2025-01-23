@@ -105,3 +105,41 @@ jobs:
           # Remove-Item -Path "$pwd\llvm-build" -Force
           $env:llvm_install_dir = "$pwd\llvm-install"
           .\build_tools.\build_test_cpp.ps1
+
+      - name: Create artifacts
+        if: ${{ !cancelled() }}
+        run: |
+          pushd third_party/iree/third_party/llvm-project
+          $llvm_sha_short = "$(git rev-parse --short HEAD)"
+          popd
+          tar cf llvm-dist-windows-$llvm_sha_short.tar llvm-install
+          tar cf iree-dist-windows.tar iree-install
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        if: ${{ !cancelled() }}
+        with:
+          name: windows_x86_64_llvm_packages
+          path: llvm-dist-*.tar
+          if-no-files-found: warn
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        if: ${{ !cancelled() }}
+        with:
+          name: windows_x86_64_iree_packages
+          path: iree-dist-windows.tar
+          if-no-files-found: warn
+
+      - name: Save cache
+        uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        if: ${{ !cancelled() && (inputs.force_ccache || github.event_name == 'push' && github.ref_name == 'main') }}
+        with:
+          path: ${{ env.CACHE_DIR }}
+          key: ${{ env.CACHE_KEY }}
+
+      - name: Start tmate session
+        if: ${{ (failure() && inputs.debug_with_tmate) || inputs.force_debug_with_tmate }}
+        uses: mxschmitt/action-tmate@e5c7151931ca95bad1c6f4190c730ecf8c7dde48 # v3.19
+        with:
+          limit-access-to-actor: true
