@@ -52,8 +52,8 @@ jobs:
 
       - name: "Checking out repository"
         env:
-          BRANCH_NAME: main
-          REPO_ADDRESS: https://github.com/nod-ai/iree-amd-aie
+          BRANCH_NAME: ${{ github.ref }}
+          REPO_ADDRESS: ${{ github.server_url }}/${{ github.repository }}
         shell: bash
         run: |
           git init
@@ -98,9 +98,7 @@ jobs:
       - name: Build packages
         run: |
           $env:cache_dir = "${{ env.CACHE_DIR }}"
-          $env:cache_dir
           $env:CCACHE_COMPILERCHECK = "string:$(clang-cl.exe --version)"
-          $env:CCACHE_COMPILERCHECK
           .\build_tools\build_llvm.ps1
           # Remove-Item -Path "$pwd\llvm-build" -Force
           $env:llvm_install_dir = "$pwd\llvm-install"
@@ -143,3 +141,56 @@ jobs:
         uses: mxschmitt/action-tmate@e5c7151931ca95bad1c6f4190c730ecf8c7dde48 # v3.19
         with:
           limit-access-to-actor: true
+
+  test_windows:
+    name: E2E Test windows
+    runs-on: windows-phoenix
+    needs: build_and_ctest
+    env:
+      XILINX_XRT: "C:\\Xilinx\\XRT"
+    steps:
+      - name: "Checking out repository" # for test scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: false # not required for testbench
+
+      - name: Download artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: windows_x86_64_iree_packages
+
+      - name: Extract artifact
+        run: |
+          tar -xvf iree-dist-windows.tar
+          Add-Content -Path $env:GITHUB_ENV -Value "IREE_INSTALL_DIR=$PWD\iree-install"
+          Add-Content -Path $env:GITHUB_ENV -Value "PYTHONPATH=$PWD\iree-install\python_packages\iree_compiler;$PWD\iree-install\python_packages\iree_runtime"
+          .\build_tools\download_peano.ps1
+          Add-Content -Path $env:GITHUB_ENV -Value "PEANO_INSTALL_DIR=$PWD\llvm-aie"
+
+      - name: Create venv and install dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          pip install -r tests\requirements.txt
+
+      - name: E2E correctness matmul test
+        shell: bash
+        run: |
+          source .venv/Scripts/activate
+          export DEVICE_HAL=xrt
+          bash build_tools/ci/run_matmul_test.sh \
+            /c/test_matmuls \
+            $PWD/iree-install \
+            $PWD/llvm-aie
+
+      - name : E2E comparison of AIE to llvm-cpu
+        shell: bash
+        run: |
+          source .venv/Scripts/activate
+          python build_tools/ci/cpu_comparison/run.py \
+            /c/test_aie_vs_cpu \
+            $PWD/iree-install \
+            --peano_dir=$PWD/llvm-aie -v \
+            --target_device "npu1_4col" \
+            --device_hal=xrt \
+            --skip_tests "Performance"
