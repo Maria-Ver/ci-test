@@ -52,8 +52,8 @@ jobs:
 
       - name: "Checking out repository"
         env:
-          BRANCH_NAME: ${{ github.ref }}
-          REPO_ADDRESS: ${{ github.server_url }}/${{ github.repository }}
+          BRANCH_NAME: main
+          REPO_ADDRESS: https://github.com/nod-ai/iree-amd-aie
         shell: bash
         run: |
           git init
@@ -149,10 +149,20 @@ jobs:
     env:
       XILINX_XRT: "C:\\Xilinx\\XRT"
     steps:
-      - name: "Checking out repository" # for test scripts
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: false # not required for testbench
+      - name: "Checking out repository"
+        env:
+          BRANCH_NAME: main
+          REPO_ADDRESS: https://github.com/nod-ai/iree-amd-aie
+        shell: bash
+        run: |
+          git init
+          git remote add origin $REPO_ADDRESS
+          git -c protocol.version=2 fetch --depth 1 origin $BRANCH_NAME
+          git reset --hard FETCH_HEAD
+          git -c submodule."third_party/torch-mlir".update=none \
+              -c submodule."third_party/stablehlo".update=none \
+              -c submodule."src/runtime_src/core/common/aiebu".update=none \
+              submodule update --init --recursive --depth 1 --single-branch -j 10
 
       - name: Download artifacts
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
